@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<module>
+	<name>nombre_modulo_generic</name>
+	<displayName><![CDATA[Mirakl La Frikilería]]></displayName>
+	<version><![CDATA[1.0.0]]></version>
+	<description><![CDATA[Módulo de La Frikilería para gestionar las plataformas de Mirakl, catálogo y pedidos para los diferentes marketplaces y canales]]></description>
+	<author><![CDATA[Sergio]]></author>
+	<tab><![CDATA[administration]]></tab>
+	<is_configurable>1</is_configurable>
+	<need_instance>1</need_instance>
+</module>
