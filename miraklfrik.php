@@ -52,7 +52,7 @@ class Miraklfrik extends Module
 
         $this->confirmUninstall = $this->l('');
 
-        $this->ps_versions_compliancy = array('min' => '1.6', 'max' => '1.6');
+        $this->ps_versions_compliancy = array('min' => '1.6', 'max' => '1.7');
     }
 
     /**
@@ -65,7 +65,8 @@ class Miraklfrik extends Module
 
         return parent::install() &&
             $this->registerHook('header') &&
-            $this->registerHook('displayBackOfficeHeader');
+            $this->registerHook('displayBackOfficeHeader') &&
+            $this->registerHook('actionAdminOrdersListingFieldsModifier');
     }
 
     public function uninstall()
@@ -216,5 +217,78 @@ class Miraklfrik extends Module
     {
         $this->context->controller->addJS($this->_path.'/views/js/front.js');
         $this->context->controller->addCSS($this->_path.'/views/css/front.css');
+    }
+
+    public function hookActionAdminOrdersListingFieldsModifier($params)
+    {
+        
+        // $log_file = _PS_ROOT_DIR_.'/modules/miraklfrik/log/pruebas_hook_'.date('Y-m-d H:i:s').'.txt';
+                    
+        // file_put_contents($log_file, date('Y-m-d H:i:s').' - Dentro hook'.PHP_EOL, FILE_APPEND);
+        // $params_json = json_encode($params);
+        // file_put_contents($log_file, date('Y-m-d H:i:s').$params_json.PHP_EOL, FILE_APPEND);
+
+        
+
+        //select para el id externo, un case para que valga para Amazon y Miraklfrik, y ponemos los de worten para los viejos, aunque ahora entrarán por miraklfrik. Para los de webservice cogemos de su tabla para que aparezcan también los de Disfrazzes por ejemplo
+        $params['select'] .= ", CASE
+                WHEN a.module = 'amazon' THEN mao.mp_order_id 
+                WHEN a.module = 'mirakl' THEN mao.mp_order_id 
+                WHEN a.module = 'WebService' THEN wor.external_id_order 
+            ELSE ''
+            END
+            AS external_id";        
+
+        $params['select'] .= ", CASE
+                WHEN a.module = 'amazon' THEN mao.sales_channel 
+                WHEN a.module = 'mirakl' THEN 'Worten' 
+                WHEN a.module = 'WebService' THEN wor.origin 
+            ELSE ''
+            END
+            AS origin";
+
+        $params['select'] .= ", CASE
+                WHEN a.module = 'amazon' THEN mao.latest_ship_date 
+                WHEN a.module = 'mirakl' THEN mao.latest_ship_date 
+                WHEN a.module = 'WebService' THEN wor.shipping_deadline 
+            ELSE ''
+            END
+            AS latest_ship_date";
+
+
+        //join a tabla lafrips_marketplace_orders que almacena order_id de amazon y su latest_ship_date
+        $params['join'] .= " LEFT JOIN lafrips_marketplace_orders mao ON (a.`id_order` = mao.`id_order`)";
+        //join a lafrips_webservice_orders donde alamcenamos  shipping_deadline
+        $params['join'] .= " LEFT JOIN lafrips_webservice_orders wor ON (a.`id_order` = wor.`id_order`)";
+
+        $params['fields']['origin'] = array(
+            'title' => 'Origen',
+            'align' => 'text-center',
+            'type' => 'text',                
+            'class' => 'fixed-width-md',
+            'orderby' => false,
+            'havingFilter' => true,                        
+            'filter_type' => 'text'
+        );
+
+        $params['fields']['external_id'] = array(
+            'title' => 'ID Externo',
+            'align' => 'text-center',
+            'type' => 'text',                
+            'class' => 'fixed-width-md',
+            'orderby' => false,
+            'havingFilter' => true,                        
+            'filter_type' => 'text'
+        );
+
+        $params['fields']['latest_ship_date'] = array(
+            'title' => 'Envío',
+            'align' => 'text-center',
+            'type' => 'text',                
+            'class' => 'fixed-width-md',
+            'orderby' => false,
+            'havingFilter' => true,                          
+            'filter_type' => 'text',
+        );
     }
 }

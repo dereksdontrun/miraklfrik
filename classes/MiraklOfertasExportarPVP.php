@@ -51,8 +51,8 @@ class MiraklOfertasExportarPVP
     public $array_ofertas_productos;    
 
     //para no asignar la variable cientos de veces, ponemos aquí ya las fechas para la subida de productos
-    //preparamos available-start-date y available-end-date. Parece ser la fecha de ejecución en formato YYYY-MM-DD y esa fecha más 10 días.
-    public $hoy; 
+    //preparamos available-start-date y available-end-date. Parece ser la fecha de ejecución en formato YYYY-MM-DD y esa fecha más 10 días. Vamos a poner como fecha inicio hoy menos uno por un posible error de fechas en el cambio de día
+    public $hoy_menos_1; 
     public $hoy_mas_10;
     
     public $sku_prestashop; 
@@ -115,79 +115,9 @@ class MiraklOfertasExportarPVP
     //array con los posibles parámetros necesarios por cada marketplace, por ejemplo, out_of_stock 1 o 0 indicando si enviamos los de permitir pedido con stock o no, campos específicos que deben ir en el csv a exportar solo para ese marketplace, etc. En este proceso no se utiliza todo
     //añado los canales de cada marketplace
     //31/05/2024 Pasamos a utilizar las tablas lafrips_mirakl_marketplaces y lafrips_mirakl_channels para la info de marketplaces etc
-    //31/05/2024 variable para guardar la info de marketplaces que sacaremos de lafrips_mirakl_marketplaces en lugar de utilizar el array de debajo $marketplace_configuration
+    //31/05/2024 variable para guardar la info de marketplaces que sacaremos de lafrips_mirakl_marketplaces en lugar de utilizar el array $marketplace_configuration
     public $marketplaces;
-    public $marketplaces_channels;
-
-    public $marketplace_configuration = array(
-        "worten" => array(
-            "activo" => 1,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "WRT_ES_ONLINE"
-                ),
-                "PT" => array(
-                    "activo" => 1,
-                    "channel_code" => "WRT_PT_ONLINE"
-                ) 
-            ),
-            "out_of_stock" => 1,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "leadtime-to-ship" => 2
-            ),
-            "tracking_id" => ""
-        ),
-        "mediamarkt" => array(
-            "activo" => 0,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "MMES"
-                )
-            ),
-            "out_of_stock" => 1,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "leadtime-to-ship" => 2,
-                "strike-price-type" => "lowest-prior-price-according-to-state-law"
-            ),
-            "tracking_id" => ""
-        ),
-        "pccomponentes" => array(
-            "activo" => 0,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_ES"
-                ),
-                "DE" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_DE"
-                ),
-                "FR" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_FR"
-                ) ,
-                "IT" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_IT"
-                ) ,
-                "PT" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_PT"
-                ) 
-            ),
-            "out_of_stock" => 0,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "canon" => 0,
-                "tipo-iva" => 21
-            ),
-            "tracking_id" => ""
-        )
-    );
+    public $marketplaces_channels;    
           
 
     public function __construct() {    
@@ -251,7 +181,9 @@ class MiraklOfertasExportarPVP
             return;
         } 
 
-        $this->hoy = date("Y-m-d"); 
+        //como available_started vamos a enviar hoy menos 1 porque sospecho que cuando se ejecuta a primera hora de la madrugada puede haber una diferencia de horarios entre servidores y quizás estoy enviando hoy, mientras en el receptor aún es ayer y se desactivan productos durante esa hora de diferencia hasta cambio de día
+        // $this->hoy = date("Y-m-d"); 
+        $this->hoy_menos_1 = date("Y-m-d", strtotime("-1 days", strtotime(date("Y-m-d"))));
         $this->hoy_mas_10 = date("Y-m-d", strtotime("+10 days", strtotime(date("Y-m-d"))));
 
         //queremos iterar los canales si hay más de uno (ES y PT en Worten, p.ejemplo) para sacar los productos en la tabla lafrips_mirakl_ofertas marcados como active = 1. Puesto que trataremos de sacar la buybox por canal, tenemos cada producto por cada marketplace-canal, es decir, una línea por producto-marketplace-canal
@@ -524,7 +456,8 @@ class MiraklOfertasExportarPVP
         (ava.quantity - IFNULL((SELECT SUM(physical_quantity) FROM lafrips_stock 
             WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute AND id_warehouse = 4),0)) AS quantity,
         (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship, pro.id_supplier AS id_supplier, mar.out_of_stock AS marketplace_out_of_stock,
-        mar.campos_especificos AS marketplace_campos_especificos
+        mar.campos_especificos AS marketplace_campos_especificos,
+        mar.additional_fields AS marketplace_additional_fields
         FROM lafrips_mirakl_ofertas mio
         JOIN lafrips_product pro ON pro.id_product = mio.id_product    
         JOIN lafrips_stock_available ava ON ava.id_product = mio.id_product AND ava.id_product_attribute = mio.id_product_attribute
@@ -547,7 +480,7 @@ class MiraklOfertasExportarPVP
 
         //preparamos las variables a enviar en el json        
 
-        //available-start-date y available-end-date las tenemos en $this->hoy y $this->hoy_mas_10        
+        //available-start-date y available-end-date las tenemos en $this->hoy_menos_1 y $this->hoy_mas_10        
 
         //tenemos que asignar el stock si el producto no tuviera y es de permitir pedido según el marketplace. Primero, si es negativo (hemos sacado el disponible online) lo ponemos a 0
         if ($info_producto['quantity'] < 0) {
@@ -587,34 +520,64 @@ class MiraklOfertasExportarPVP
         $campos_especificos = json_decode($info_producto['marketplace_campos_especificos'], true);        
 
         //ahora, si hay campos específicos añadimos los values al array array_campos_especificos
-        //lo cierto es que los campos específicos de algunos marketplaces no sé si se pueden enviar con la API, por ejemplo, canon y tipo-iva de PCcomponentes no parece que se configurern con la api. Damos por hecho que como la primera vez que se exportan es con csv donde si acpeta el campo, el producto ya lo tendría con sus valores, dado que esos no cambian. Mientras que leadtime-to-ship si que se puede actualizar con la API
-        $array_campos_especificos = array();
-        foreach ($campos_especificos AS $key => $value) {
-            //cambiamos el guión por guión bajo ya que la API lo espera así
-            $key = str_replace("-", "_", $key);
-            //si es tipo-iva lo hemos sacado en la consulta
-            if ($key == 'tipo_iva') {
-                $array_campos_especificos[$key] = $info_producto['tipo_iva'];
-            } elseif ($key == 'leadtime_to_ship') {
-                //el leadtime-to-ship lo hemos sacado para el proveedor por defecto del producto, y se pone ese si es venta sin stock, o 1 por defecto si hay stock físico. Si se vende sin stock 'quantity' será 999 en este punto. Si no hay stock da igual porque no saldrá a la venta
-                if ($info_producto['quantity'] == 999) {
-                    $array_campos_especificos[$key] = $info_producto['supplier_leadtime_to_ship'];
-                } else {                    
-                    $array_campos_especificos[$key] = 1;
-                }                    
-            }else {
-                //valores fijos, por ejemplo canon = 0, "strike-price-type": "lowest-prior-price-according-to-state-law"
-                $array_campos_especificos[$key] = $value;
-            }                
+        //los campos específicos, específicos de algunos marketplaces se pueden enviar con la API, por ejemplo, canon y tipo-iva de PCcomponentes pero metiéndolos dentro de offer_additional_fields y con guión en medio, de otra manera. Damos por hecho que como la primera vez que se exportan es con csv donde si acpeta el campo, el producto ya lo tendría con sus valores, dado que esos no cambian. Mientras que leadtime-to-ship si que se puede actualizar con la API
+        if (!empty($campos_especificos)) {
+            $array_campos_especificos = array();
+            foreach ($campos_especificos AS $key => $value) {
+                //cambiamos el guión por guión bajo ya que la API lo espera así
+                $key = str_replace("-", "_", $key);
+                //si es tipo-iva lo hemos sacado en la consulta
+                if ($key == 'leadtime_to_ship') {
+                    //el leadtime-to-ship lo hemos sacado para el proveedor por defecto del producto, y se pone ese si es venta sin stock, o 1 por defecto si hay stock físico. Si se vende sin stock 'quantity' será 999 en este punto. Si no hay stock da igual porque no saldrá a la venta
+                    if ($info_producto['quantity'] == 999) {
+                        $array_campos_especificos[$key] = $info_producto['supplier_leadtime_to_ship'];
+                    } else {                    
+                        $array_campos_especificos[$key] = 1;
+                    }                    
+                } else {
+                    //valores fijos
+                    $array_campos_especificos[$key] = $value;
+                }                
+            }
         }
 
-        //tenemos que generar un json por producto, que luego se insertará en el json con todos los productos a exportar (100max por llamada a api OF24) con el siguiente formato, teniendo en cuenta que campos específicos (en el ejemplo es tradeinn, espcifico el leadtiem_to_ship) debe ser precisamente, específico, dependiendo del marketplace
+        //sacamos additional fields, si los hay
+        $additional_fields = json_decode($info_producto['marketplace_additional_fields'], true);
+
+        if (!empty($additional_fields)) {
+            $array_additional_fields = array();
+            foreach ($additional_fields AS $key => $value) {
+                //aquí parece que no hay que cambiar el guión por guión bajo                
+                //si es tipo-iva lo hemos sacado en la consulta
+                if ($key == 'tipo-iva') {
+                    $array_additional_fields[$key] = $info_producto['tipo_iva'];
+                } elseif ($key == 'fulfillment-latency') {
+                    //al fulfillment-latency de momento le ponemos el valor de leadtime-to-ship 
+                    if ($info_producto['quantity'] == 999) {
+                        $array_additional_fields[$key] = $info_producto['supplier_leadtime_to_ship'];
+                    } else {                    
+                        $array_additional_fields[$key] = 1;
+                    }                    
+                } else {
+                    //valores fijos, por ejemplo canon = 0 para pccomponentes o strike-price-type para mediamarkt
+                    $array_additional_fields[$key] = $value;
+                }                
+            }
+        }
+
+        //tenemos que generar un json por producto, que luego se insertará en el json con todos los productos a exportar (100max por llamada a api OF24) con el siguiente formato, teniendo en cuenta que campos específicos (en el ejemplo es tradeinn, espcifico el leadtiem_to_ship) debe ser precisamente, específico, dependiendo del marketplace. también hay un eejmplo de como poner los campos adicionales, propios de cada amrketplace, aunque no pertenezca al ejemplo (fulfillment-latency)
         /*
         {      
             "available_ended": "2024-07-18T12:00:00Z",
             "available_started": "2024-06-18T12:00:00Z",
             "leadtime_to_ship": 2, 
             "price": 17.90,  
+            "offer_additional_fields": [
+                {
+                    "code": "fulfillment-latency",
+                    "value": "2"
+                }
+            ],  
             "all_prices": [        
               {
                 "channel_code": "DE",          
@@ -629,7 +592,7 @@ class MiraklOfertasExportarPVP
         */
 
         $this->array_oferta_producto = [
-            "available_started" => $this->hoy,  
+            "available_started" => $this->hoy_menos_1,  
             "available_ended" => $this->hoy_mas_10,  
             "quantity" => $info_producto['quantity'],  
             "state_code" => 11,  
@@ -643,8 +606,32 @@ class MiraklOfertasExportarPVP
         ];
 
         //añadimos los campos específicos
-        foreach ($array_campos_especificos AS $key => $value) {
-            $this->array_oferta_producto[$key] = $value;
+        if (!empty($campos_especificos)) {
+            foreach ($array_campos_especificos AS $key => $value) {
+                $this->array_oferta_producto[$key] = $value;
+            }
+        }
+
+        //añadimos los additional_fields, que llevan otro formato más compuesto
+        /*
+        "offer_additional_fields": [
+            {
+            "code": "fulfillment-latency",
+            "value": "2"
+            }
+        ],  
+        */
+        if (!empty($additional_fields)) {
+            $this->array_oferta_producto['offer_additional_fields'] = array();
+            $array_additional_field = array();
+            foreach ($array_additional_fields AS $key => $value) {
+                $array_additional_field = array(
+                    "code" => $key,
+                    "value" => $value
+                );
+
+                $this->array_oferta_producto['offer_additional_fields'][] = $array_additional_field;
+            }
         }
 
         //25/06/2024 Comprobamos el stock que se va a exportar, si es 0 el producto se desactivará en Mirakl, de modo que lo vamos a marcar ahora como active = 0 en lafrips_mirakl_ofertas para evitar que el proceso lo veulva a sacar para otros canales si los hay.
@@ -797,7 +784,7 @@ class MiraklOfertasExportarPVP
                     WHERE marketplace = '".$this->marketplace."'
                     AND channel = '".$this->channel."'";
                     
-                    Db::getInstance()->executeS($sql_update);
+                    Db::getInstance()->execute($sql_update);
 
                 }
 
@@ -1053,7 +1040,7 @@ class MiraklOfertasExportarPVP
 
         // echo 'sql: <br>'.$sql_update;
         
-        if (!Db::getInstance()->executeS($sql_update)) {
+        if (!Db::getInstance()->execute($sql_update)) {
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Error haciendo update de pvp ofertas en marketplace '.$this->marketplace.', canal '.$this->channel.' para  sku_mirakl = '.$this->sku_mirakl.' en tabla lafrips_mirakl_ofertas'.PHP_EOL, FILE_APPEND); 
     
             $this->error = 1;
@@ -1075,7 +1062,7 @@ class MiraklOfertasExportarPVP
         WHERE sku_mirakl = '".$this->sku_mirakl."' 
         AND marketplace = '".$this->marketplace."'";        
         
-        if (!Db::getInstance()->executeS($sql_desactiva)) {
+        if (!Db::getInstance()->execute($sql_desactiva)) {
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Error haciendo update en desactivaProductoTablaOferta en marketplace '.$this->marketplace.', canal '.$this->channel.' para  sku_mirakl = '.$this->sku_mirakl.' en tabla lafrips_mirakl_ofertas'.PHP_EOL, FILE_APPEND); 
     
             $this->error = 1;
@@ -1106,7 +1093,7 @@ class MiraklOfertasExportarPVP
         AND marketplace = '".$this->marketplace."'
         AND channel = '".$this->channel."'";
         
-        if (!Db::getInstance()->executeS($sql_update)) {
+        if (!Db::getInstance()->execute($sql_update)) {
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Error haciendo update en resetProductoTablaOferta en marketplace '.$this->marketplace.', canal '.$this->channel.' para  sku_mirakl = '.$this->sku_mirakl.' en tabla lafrips_mirakl_ofertas'.PHP_EOL, FILE_APPEND); 
     
             $this->error = 1;
@@ -1122,7 +1109,7 @@ class MiraklOfertasExportarPVP
         SET
         check_pvp = 0";
         
-        if (!Db::getInstance()->executeS($sql_update)) {
+        if (!Db::getInstance()->execute($sql_update)) {
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Error reseteando pvp_check en tabla lafrips_mirakl_ofertas'.PHP_EOL, FILE_APPEND); 
     
             $this->error = 1;

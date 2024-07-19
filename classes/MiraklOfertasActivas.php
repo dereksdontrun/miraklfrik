@@ -10,7 +10,7 @@ require_once(dirname(__FILE__).'/../../../init.php');
 //https://lafrikileria.com/modules/miraklfrik/classes/MiraklOfertasActivas.php?cron=true
 
 //22/05/2024 Proceso para descargar un csv o json con las ofertas activas de cada marketplace y canal, es decir, solo productos activos - con stock en las plataformas. Estos productos se almacenarán o actualizarán en la tabla lafrips_mirakl_ofertas para después revisar cada uno con otra API obteniendo todos sus vendedores en la plataforma, y en función del PVP más barato, almacenar un posible PVP nuestro para la BuyBox. Después el proceso que exporta los productos con su stock y precio consultará esa tabla para enviar dicho precio que pueda ganar la BuyBox
-//solicitamos los productos activos con la API OFF52 la cual es asincrona y devuelve un tracking_id para después pedirlo con la API OFF53. Como no se puede hacer seguido ya que no le da tiempo a procesar, primero almacenamos los tracking_id para todos los marketplaces en el array $marketplace_configuration, después pararemos 10 segundos antes de solicitar la descarga. La API tampoco permite pedir para cada canal seguido por "too many requests" pero como casi seguro que los productos activos son los mismos en todos los canales de cada marketplace,haremos solo una petición por marketplace, auqnue a la hora de procesar precios lo tengamos que hacer por canal y por tanto insertar una línea por canal y producto en lafrips_mirakl_ofertas
+//solicitamos los productos activos con la API OFF52 la cual es asincrona y devuelve un tracking_id para después pedirlo con la API OFF53. Como no se puede hacer seguido ya que no le da tiempo a procesar, primero almacenamos los tracking_id para todos los marketplaces en el array $marketplace_configuration (ya no se usa, guardamos en un array para trackings), después pararemos 10 segundos antes de solicitar la descarga. La API tampoco permite pedir para cada canal seguido por "too many requests" pero como casi seguro que los productos activos son los mismos en todos los canales de cada marketplace,haremos solo una petición por marketplace, auqnue a la hora de procesar precios lo tengamos que hacer por canal y por tanto insertar una línea por canal y producto en lafrips_mirakl_ofertas
 
 //30/05/2024 tenemos que calcular el pvp_minimo al que podemos poner el producto en el moemnto de bajar las ofertas activas. Para ello tengo que saber si el producto es outlet, tipo C, venta sin stock o normal, lo que nos da un porcentaje mínimo. El porcentaje minimo para cada tipo esta en la tabla lafrips_reglas_amazon. Además otro porcetaje de 15% de comisión, por ahora, más el 21% iva, más preparación, que está guardado en tabla configuration Configuration::get('COSTE_PREPARACION_PRODUCTO') más los gastos de envío (si pvp minimo hasta aqui sale > 30 coste sign, si no coste tracked)
 // ((pro.wholesale_price*((tax.rate/100)+1) * (((are.margen_minimo_sin_stock + comision_marketplace)/100) + 1)) + $preparacion + gastos_envio)
@@ -21,6 +21,8 @@ require_once(dirname(__FILE__).'/../../../init.php');
 //03/06/2024 Vamos a calcular el pvp mínimo e insertarlo con el producto cada vez que bajemos los productos activos, de modo que lo tengmaos disponible para cuando procesemos las ofertas para calcular la buy box
 
 //25/06/2024 Metemos la clase en módulo miraklfrik
+
+//09/07/2024 Hay que integrar diferentes cambios de moneda como en frik_amazon_reglas, ya que hemos introducido el Marketplace Empik de Polonia y los pvp han de ir en su moneda.
 
 // ini_set('error_log', _PS_ROOT_DIR_.'/modules/miraklfrik/log/error/php_error.log');
 
@@ -94,76 +96,7 @@ class MiraklOfertasActivas
     //añado los canales de cada marketplace
     //31/05/2024 Pasamos a utilizar las tablas lafrips_mirakl_marketplaces y lafrips_mirakl_channels para la info de marketplaces etc, en lugar del array $marketplace_configuration de modo que no haya que estar actualizando el array en cada proceso programado. Aquí crearemos un array para guardar el tracking_id de cada marketplace mientras estamos ejecutando. Los meteremos al vuelo, tanto nombre de marketplace como tracking_id, de modo que lo declaramos vacío
     public $marketplaces_tracking_ids = array();
-    public $marketplace_configuration = array(
-        "worten" => array(
-            "activo" => 1,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "WRT_ES_ONLINE"
-                ),
-                "PT" => array(
-                    "activo" => 1,
-                    "channel_code" => "WRT_PT_ONLINE"
-                ) 
-            ),
-            "out_of_stock" => 1,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "leadtime-to-ship" => 2
-            ),
-            "tracking_id" => ""
-        ),
-        "mediamarkt" => array(
-            "activo" => 1,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "MMES"
-                )
-            ),
-            "out_of_stock" => 1,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "leadtime-to-ship" => 2,
-                "strike-price-type" => "lowest-prior-price-according-to-state-law"
-            ),
-            "tracking_id" => ""
-        ),
-        "pccomponentes" => array(
-            "activo" => 1,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_ES"
-                ),
-                "DE" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_DE"
-                ),
-                "FR" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_FR"
-                ) ,
-                "IT" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_IT"
-                ) ,
-                "PT" => array(
-                    "activo" => 0,
-                    "channel_code" => "WEB_PT"
-                ) 
-            ),
-            "out_of_stock" => 0,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "canon" => 0,
-                "tipo-iva" => 21
-            ),
-            "tracking_id" => ""
-        )
-    );
-          
+              
 
     public function __construct() {    
 
@@ -285,17 +218,17 @@ class MiraklOfertasActivas
 
             //pedimos la comprobación del tracking_id y si es COMPLETED almacenaremos la url del json a descargar
             if (!$this->apiOFF53StatusProductosActivos()) {
-                return false;
+                continue;
             }
 
             //pedimos la descarga del json y guardamos el informe en $this->productos_activos
             if (!$this->apiOFF54GeTProductosActivos()) {
-                return false;
+                continue;
             }  
 
             //ponemos active a 0 en los productos del marketplace
             if (!$this->resetMiraklOfertas()) {
-                return false;
+                continue;
             } 
 
             //procesamos el JSON de productos activos que ha sido pasado a objeto, $this->productos_activos, comparando con tabla lafrips_mirakl_ofertas
@@ -384,6 +317,7 @@ class MiraklOfertasActivas
         }
 
         //necesitamos saber de que canales del marketplace en proceso hay que sacar el pvp minimo, ya que depende del pais del canal los gastos de envío. Tenemos que obtener el código iso (ES, PT, DE etc) del canal para buscar en frik_reglas_amazon 
+        //09/07/2024 tenemos en cuenta el cambio en frik_reglas_amazon, para monedas como PLN de Polonia...
         $sql_select_channels = "SELECT id_mirakl_ofertas, channel 
         FROM lafrips_mirakl_ofertas 
         WHERE marketplace = '".$this->marketplace."'
@@ -409,7 +343,7 @@ class MiraklOfertasActivas
                     ((pro.price*((tax.rate/100)+1)) + are.coste_sign)
                 ELSE ((pro.price*((tax.rate/100)+1)) + are.coste_track)
             END
-            , 2)
+            *are.cambio , 2)
             AS pvp_publicacion,
             ROUND(
             CASE #case para saber si es sin stock, outlet, c o 'normal'
@@ -442,7 +376,7 @@ class MiraklOfertasActivas
                     END
                 ) #fin case no es outlet ni C ni sin stock       
             END
-            , 2)
+            *are.cambio , 2)
             AS 'pvp_minimo'
             FROM lafrips_product pro
             JOIN lafrips_stock_available ava ON pro.id_product = ava.id_product
@@ -482,7 +416,7 @@ class MiraklOfertasActivas
                 pvp_publicacion = ".$pvp_minimo_y_publicacion['pvp_publicacion']."
                 WHERE id_mirakl_ofertas = ".$channel['id_mirakl_ofertas'];
 
-                if (!Db::getInstance()->executeS($update_pvp_minimo)) {
+                if (!Db::getInstance()->execute($update_pvp_minimo)) {
                     file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Error haciendo update pvp mínimo y de publicación en marketplace '.$this->marketplace.', canal '.$channel['channel'].', para producto referencia '.$this->sku_prestashop.' sku_mirakl = '.$this->sku_mirakl.' en tabla lafrips_mirakl_ofertas'.PHP_EOL, FILE_APPEND); 
             
                     $this->error = 1;
@@ -731,7 +665,7 @@ class MiraklOfertasActivas
         WHERE sku_mirakl = '".$this->sku_mirakl."' 
         AND marketplace = '".$this->marketplace."'";
         
-        if (!Db::getInstance()->executeS($sql_update)) {
+        if (!Db::getInstance()->execute($sql_update)) {
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Error haciendo update active = 1 en marketplace '.$this->marketplace.' para producto referencia '.$this->sku_prestashop.' sku_mirakl = '.$this->sku_mirakl.' en tabla lafrips_mirakl_ofertas'.PHP_EOL, FILE_APPEND); 
     
             $this->error = 1;
@@ -953,7 +887,8 @@ class MiraklOfertasActivas
                 return false;
 
             } else {
-                //podría devolver más de una url si hubiera muchos datos, pero por ahora no parece que se de el caso. Habría que modificar items_per_chunk o megabytes_per_chunk en la petición original, según sea exceso de productos o de tamaño de archivo, o bien hacer un proceso que gestione varios archivos/urls                 
+                //podría devolver más de una url si hubiera muchos datos, pero por ahora no parece que se de el caso. Habría que modificar items_per_chunk o megabytes_per_chunk en la petición original, según sea exceso de productos o de tamaño de archivo, o bien hacer un proceso que gestione varios archivos/urls   
+                //27/06/2024 También puede darse el caso de que no devuelva ninguna url, podría ser un error o simplemente un marketplace sin abrir o quizás cerrado por vacaciones¿?. Recogemos el evento para no enviar a la sigueinte API una url inexistente, lo que da luegar a Exception              
 
                 file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Respuesta de la API a petición /api/offers/export/async/status/:tracking_id de estado de petición de productos activos para marketplace '.ucfirst($this->marketplace).' correcta'.PHP_EOL, FILE_APPEND);
                 file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Http Response Code = '.$http_code.PHP_EOL, FILE_APPEND);
@@ -962,7 +897,11 @@ class MiraklOfertasActivas
                     file_put_contents($this->log_file, date('Y-m-d H:i:s').' - La respuesta contiene más de una url por exceso de tamaño o productos'.PHP_EOL, FILE_APPEND);
 
                     return false;
-                }    
+                } elseif (count($response_decode->urls) < 1) {
+                    file_put_contents($this->log_file, date('Y-m-d H:i:s').' - WARNING, No se recibió url para las ofertas. Indica ausencia de ofertas activas o marketplace cerrado o inactivo'.PHP_EOL, FILE_APPEND);
+
+                    return false;
+                } 
 
                 //nos quedamos con la url única
                 $this->url_json = $response_decode->urls[0];

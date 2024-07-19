@@ -13,8 +13,8 @@ require_once(dirname(__FILE__).'/../../../init.php');
 
 //30/04/2024 Proceso para enviar catálogo vía API. En principio es para Worten, vamos a ver si puedo hacerlo compatible para todos los marketplaces de Mirakl añadiendo cada Endpoint y API Key
 //31/05/2024 Este proceso lo utilizamos para todos los marketplaces para actualizar el stock cada hora, y tenemos que adaptarlo para enviar el pvp para cada canal. Para ello, por ejemplo con worten tenemos que enviar dos columnas más, price[channel=WRT_ES_ONLINE] y price[channel=WRT_PT_ONLINE] y haremos la prueba de enviar las mismas columnas para cada canal de cada uno de los otros marketplaces
-//05/06/2024 Vamos a poner un a variable $solo_stock que cuando sea true indicará que el archivo a exportar no contendrá pvps, solo stock, de modo que los pvp se estarían actualizando con el proceso MiraklOfertasPVP. AÚN NO SÉ SI SE VA A USAR
 
+//09/07/2024 Hay que integrar diferentes cambios de moneda como en frik_amazon_reglas, ya que hemos introducido el Marketplace Empik de Polonia y los pvp han de ir en su moneda.
 
 // ini_set('error_log', _PS_ROOT_DIR_.'/modules/miraklfrik/log/error/php_error.log');
 
@@ -90,83 +90,15 @@ class MiraklCatalogoMarketplaceAPI
     public $out_of_stock;
     public $modificacion_pvp;
     public $campos_especificos = array();
+    public $additional_fields = array();
     public $end_point;
     public $shop_key;
     public $import_id;
 
-    //31/05/2024 variable para guardar la info de marketplaces que sacaremos de lafrips_mirakl_marketplaces en lugar de utilizar el array de debajo $marketplace_configuration
+    //31/05/2024 variable para guardar la info de marketplaces que sacaremos de lafrips_mirakl_marketplaces en lugar de utilizar el array $marketplace_configuration
     public $marketplaces;
     public $marketplace_channels;
-
-    //array con los posibles parámetros necesarios por cada marketplace, por ejemplo, out_of_stock 1 o 0 indicando si enviamos los de permitir pedido con stock o no, campos específicos que deben ir en el csv a exportar solo para ese marketplace, etc
-    //añado los canales de cada marketplace, pero subiendo csv con productos probablemente no necesite especificarlos, además, solo en worten tenemos más de uno activo
-    public $marketplace_configuration = array(
-        "worten" => array(
-            "activo" => 1,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "WRT_ES_ONLINE"
-                ),
-                "PT" => array(
-                    "activo" => 1,
-                    "channel_code" => "WRT_PT_ONLINE"
-                ) 
-            ),
-            "out_of_stock" => 1,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "leadtime-to-ship" => 2
-            )
-        ),
-        "mediamarkt" => array(
-            "activo" => 1,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "MMES"
-                )
-            ),
-            "out_of_stock" => 1,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "leadtime-to-ship" => 2,
-                "strike-price-type" => "lowest-prior-price-according-to-state-law"
-            )
-        ),
-        "pccomponentes" => array(
-            "activo" => 0,
-            "channels" => array(
-                "ES" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_ES"
-                ),
-                "DE" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_DE"
-                ),
-                "FR" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_FR"
-                ) ,
-                "IT" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_IT"
-                ) ,
-                "PT" => array(
-                    "activo" => 1,
-                    "channel_code" => "WEB_PT"
-                ) 
-            ),
-            "out_of_stock" => 0,
-            "modificacion_pvp" => 0,
-            "campos_especificos" => array(
-                "canon" => 0,
-                "tipo-iva" => 21
-            )
-        )
-    );
-          
+             
 
     public function __construct() {    
 
@@ -239,6 +171,9 @@ class MiraklCatalogoMarketplaceAPI
 
             //decodificamos el json almacenado en tabla a array PHP
             $this->campos_especificos = json_decode($marketplace['campos_especificos'], true);
+
+            //decodificamos el json almacenado en tabla a array PHP
+            $this->additional_fields = json_decode($marketplace['additional_fields'], true);
 
             //31/05/2024 Ahora queremos añadir otra columna de price por cada canal del marketplace de la forma price[channel=WRT_PT_ONLINE]. Sacamos los canales activos del marketplace en proceso desde la tabla lafrips_mirakl_channels
             $sql_channel_codes = "SELECT channel_code, principal FROM lafrips_mirakl_channels WHERE active = 1 AND marketplace_id = ".$this->id_mirakl_marketplace;
@@ -407,8 +342,9 @@ class MiraklCatalogoMarketplaceAPI
     //función que genera el archivo csv para los productos a exportar, en función de las características del marketplace, es decir, si se permite venta sin stock, si hay que modificar el pvp, si tiene campos específicos a ese marketplace, etc. Se genera uno por marketplace que se almacenará 15 días en el servidor /csv_marketplaces
     //todos los csv tendrán unos campos comunes a todos los marketplaces. A 08/05/2024:
     //sku;product-id;product-id-type;price;quantity;state;available-start-date;available-end-date;discount-price;discount-start-date;discount-end-date;update-delete;
-    //Los de desceunto de momento no usamos pero los dejamos preparados. Algunos campos extra que no están en todos y se almacenan en $marketplace_configuration['campos_especificos'] son:
+    //Los de desceunto de momento no usamos pero los dejamos preparados. campos_especificos o additional_fields son:
     //leadtime-to-ship;strike-price-type;canon;tipo-iva;
+    //15/07/2024 cambiado campos espc´diifcos, repartimos con additional fields para diferenciar los que solo existen en un marketplaces de los que son comunes aunque no se usen
     //31/05/2024 tenemos que adaptarlo para enviar el pvp para cada canal. Para ello, por ejemplo con worten tenemos que enviar dos columnas más, price[channel=WRT_ES_ONLINE] y price[channel=WRT_PT_ONLINE] y haremos la prueba de enviar las mismas columnas para cada canal de cada uno de los otros marketplaces. En lugar de tratarlo como los campos específicos, lo construiremos sacando el channel code de cada canal y creando así el csv
     public function generaCsv() {
         //a las 5 de la mañana eliminamos los csv backup de más de x dias. Como ocupan mucho los voy a dejar 8 días contando qcon que hay copia en cada marketplace en la sección de importación
@@ -453,9 +389,18 @@ class MiraklCatalogoMarketplaceAPI
         //sku;product-id;product-id-type;quantity;state;available-start-date;available-end-date;update-delete;
         $linea_csv = array("sku","product-id","product-id-type","quantity","state","available-start-date","available-end-date","update-delete");
 
-        foreach ($this->campos_especificos AS $key => $value) {
-            $linea_csv[] = $key;
-        }   
+        if (!empty($this->campos_especificos)) {
+            foreach ($this->campos_especificos AS $key => $value) {
+                $linea_csv[] = $key;
+            }
+        }         
+        
+        //15/07/2024 Añadimos additional_fields, los campos específicos propios de cada marketplace, es decir, no existen en principio en otros marketplaces
+        if (!empty($this->additional_fields)) {
+            foreach ($this->additional_fields AS $key => $value) {
+                $linea_csv[] = $key;
+            }
+        } 
         
         //31/05/2024 Ahora tenemos que añadir otra columna de price por cada canal del marketplace de la forma price[channel=WRT_PT_ONLINE]. Sacamos los canales activos del marketplace en proceso desde la tabla lafrips_mirakl_channels        
         foreach ($this->marketplace_channels AS $marketplace_channel) {
@@ -469,9 +414,10 @@ class MiraklCatalogoMarketplaceAPI
         //state es NEW y su id es 11.
         $product_state = 11;
 
-        //preparamos available-start-date y available-end-date. Parece ser la fecha de ejecución en formato YYYY-MM-DD y esa fecha más 30 días. Vamos a poner 10 días si traga de modo que si perdieramos el control de un producto, se desactivaría a los 10 días
-        $hoy = date("Y-m-d"); 
-        $hoy_mas_10 = date("Y-m-d", strtotime("+10 days", strtotime($hoy)));
+        //preparamos available-start-date y available-end-date. Parece ser la fecha de ejecución en formato YYYY-MM-DD y esa fecha más 30 días. Vamos a poner 10 días si traga de modo que si perdieramos el control de un producto, se desactivaría a los 10 días. Vamos a poner como fecha inicio hoy menos uno por un posible error de fechas en el cambio de día
+        // $hoy = date("Y-m-d"); 
+        $hoy_menos_1 = date("Y-m-d", strtotime("-1 days", strtotime(date("Y-m-d"))));
+        $hoy_mas_10 = date("Y-m-d", strtotime("+10 days", strtotime(date("Y-m-d"))));
 
         foreach($this->productos AS $producto) {  
             //20/06/2024 quizás esto no lo activemos, pero he modificado MiraklOfertasPVP.php para que en el mismo proceso en el que descargamos las ofertas de los productos con otros vendedores y calculamos el pvp_exportado para competir por buybox, se exporte la info de la oferta de vuelta al marketplace y canal de Mirakl que estemos trabajando, de modo que hay que modificar este proceso para no volver a exportar esa información en el csv sino dejar el csv solo para los que o bien no están en los marketplaces y vamos probando o bien están pero no estaban activos por ejemplo por falta de stock y hay que seguir intentando subirlos. Para esto tenemos aquí un campo activo_mirakl que indica que id_product con id_product_attribute se encuentran en lafrips_mirakl_ofertas, pero no sabemos para qué marketplace o canal, o si está activo. Este campo lo he puesto para evitar perder tiempo con productos que ya tienen el pvp calculado en la tabla, pero ahora lo voy a usar para, o bien, si los ids no están en la tabla, saber que hay que enviarlo en el csv, o bien están y hay que comprobar si lo están para el canal en proceso, y activos, es decir, ya se han subido en el json via api y no hay que meterlos en el csv. Por eso, cada producto con activo_mirakl = 1 debemos asegurarnos de su situación. Se buscará si lo está y activo para el marketplace en proceso. Si no está, lo continuamos y se meterá en el csv, si está se considera que ya se actualizó en el otro proceso y pasamos al sigueinte producto, limpiando $linea_csv antes. Solo necesitamos mirar si está activo para el marketplace, porque si un producto está activo en un canal de un marketplace, lo está en todos (o eso creemos), de modo que en este punto vamos a la tabla y buscamos el producto activo para el marketplace, si no devuelve nada es que o bien no está para ese marketplace y lo queremos añadir al csv, o la última vez que bajamos los activos no lo estaba e igualmente volvemos a enviarlo en csv por si ha cambiado su estado en Prestashop. Si lo encontramos activo para el marketplace pasamos al siguiente.
@@ -498,24 +444,53 @@ class MiraklCatalogoMarketplaceAPI
             // if ($this->modificacion_pvp !== 0) {
             //     $producto['price'] = $this->modificaPVP($producto['price'], $this->modificacion_pvp);
             // }
+
+            //05/07/2024 El marketplace Leclerc no admite EAN en el catálogo escrito en mayúsculas, y los otros hasta ahora no lo admiten en minúscuals, de modo que meto aquí un condicional cutre para ponerlo en minúsculas para los señoritos
+            if ($this->marketplace == 'leclerc') {
+                $ean = 'ean';
+            } else {
+                $ean = 'EAN';
+            }
             
-            $linea_csv = array($producto['sku'], $producto['product-id'], 'EAN', $producto['quantity'], $product_state, $hoy, $hoy_mas_10, "UPDATE");
+            $linea_csv = array($producto['sku'], $producto['product-id'], $ean, $producto['quantity'], $product_state, $hoy_menos_1, $hoy_mas_10, "UPDATE");
 
             //ahora, si hay campos específicos añadimos los values al array $linea_csv
-            foreach ($this->campos_especificos AS $key => $value) {
-                //si es tipo-iva lo hemos sacado en la consulta
-                if ($key == 'tipo-iva') {
-                    $linea_csv[] = $producto['tipo-iva'];
-                } elseif ($key == 'leadtime-to-ship') {
-                    //el leadtime-to-ship lo hemos sacado para el proveedor por defecto del producto, y se pone ese si es venta sin stock, o 1 por defecto si hay stock físico. Si se vende sin stock 'quantity' será 999 en este punto
-                    if ($producto['quantity'] == 999) {
-                        $linea_csv[] = $producto['supplier_leadtime_to_ship'];
+            //15/07/2024 Marketplace ePrice tiene un campo fulfillment-latency, por ahora le ponemos el mismo valor que leadtime_to_ship con el mismo cálculo de si tiene stock
+            if (!empty($this->campos_especificos)) {
+                foreach ($this->campos_especificos AS $key => $value) {
+                    //si es tipo-iva lo hemos sacado en la consulta
+                    if ($key == 'leadtime-to-ship') {
+                        //el leadtime-to-ship lo hemos sacado para el proveedor por defecto del producto, y se pone ese si es venta sin stock, o 1 por defecto si hay stock físico. Si se vende sin stock 'quantity' será 999 en este punto
+                        if ($producto['quantity'] == 999) {
+                            $linea_csv[] = $producto['supplier_leadtime_to_ship'];
+                        } else {
+                            $linea_csv[] = 1;
+                        }                    
                     } else {
-                        $linea_csv[] = 1;
-                    }                    
-                }else {
-                    $linea_csv[] = $value;
-                }                
+                        //valores fijos
+                        $linea_csv[] = $value;
+                    }                
+                }
+            }             
+
+            //15/07/2024 Añadimos additional_fields, los campos específicos propios de cada marketplace, es decir, no existen en principio en otros marketplaces        
+            if (!empty($this->additional_fields)) {
+                foreach ($this->additional_fields AS $key => $value) {
+                    //si es tipo-iva lo hemos sacado en la consulta
+                    if ($key == 'tipo-iva') {
+                        $linea_csv[] = $producto['tipo-iva'];
+                    } elseif ($key == 'fulfillment-latency') {
+                        //al fulfillment-latency de momento le ponemos el valor de leadtime-to-ship 
+                        if ($producto['quantity'] == 999) {
+                            $linea_csv[] = $producto['supplier_leadtime_to_ship'];
+                        } else {
+                            $linea_csv[] = 1;
+                        }                    
+                    } else {
+                        //valores fijos como canon = 0
+                        $linea_csv[] = $value;
+                    }                
+                }
             }
 
             //31/05/2024 Ahora tenemos que añadir otra columna de price por cada canal del marketplace de la forma price[channel=WRT_PT_ONLINE]. 
@@ -610,6 +585,7 @@ class MiraklCatalogoMarketplaceAPI
     //         (((pro.price*((tax.rate/100)+1)) + are.coste_sign)*((mim.comision/100)+1))
     //     ELSE (((pro.price*((tax.rate/100)+1)) + are.coste_track)*((mim.comision/100)+1))
     // END
+    //09/07/2024 Hay que integrar diferentes cambios de moneda como en frik_amazon_reglas, ya que hemos introducido el Marketplace Empik de Polonia y los pvp han de ir en su moneda. Utilizamos el campo cambio de frik_amazon_reglas *are.cambio
     public function getPvpPublicacion($id_product, $channel_code) {
         $sql_pvp_publicacion = "SELECT
         ROUND(
@@ -618,7 +594,7 @@ class MiraklCatalogoMarketplaceAPI
                 ((pro.price*((tax.rate/100)+1)) + are.coste_sign)
             ELSE ((pro.price*((tax.rate/100)+1)) + are.coste_track)
         END
-        , 2)
+        *are.cambio, 2)
         AS pvp_publicacion
         FROM lafrips_product pro        
         JOIN lafrips_tax_rule tar ON pro.id_tax_rules_group = tar.id_tax_rules_group AND tar.id_country = 6
@@ -644,10 +620,12 @@ class MiraklCatalogoMarketplaceAPI
 
     //función para buscar un producto en lafrips_mirakl_ofertas por sus ids y canal que si lo encuentra devuelve el pvp resultante del proceso de buybox, pvp_exportar
     //deveulve un array('exportar'=>xxx , 'publicacion'=> xxx) Si el pvp_exportado estuviera vacío en su lugar en el array se meterá también el valor de publicación
+    //09/07/2024 Añadimos la condición a la SELECT del marketplace, ya que si no indicamos marketplace hay errores con canales con mismo nombre (INIT...)
     public function getPvps($id_product, $id_product_attribute, $channel) {
         $sql_select_pvps = "SELECT pvp_exportado, pvp_publicacion
         FROM lafrips_mirakl_ofertas
         WHERE channel = '".$channel."'
+        AND marketplace = '".$this->marketplace."'
         AND id_product = $id_product
         AND id_product_attribute = $id_product_attribute";  
 
