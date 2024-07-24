@@ -893,11 +893,18 @@ class MiraklPedidos
         
         $postfields = http_build_query($parameters);
 
-        if ($this->test) {
+        // if ($this->test) {
+        //     $endpoint = "https://lafrikileria.com/test/api/order?output_format=JSON";
+        // } else {
+        //     $endpoint = "https://lafrikileria.com/api/order?output_format=JSON";
+        // }       
+
+        //22/07/2024 como cada vez que hago pruebas en test me olvido de poner $this->test a true y se generan los pedidos de prueba en producción, vamos a indicar el endpoint correcto así:
+        if (strpos(_PS_ROOT_DIR_, "/test") !== false) {
             $endpoint = "https://lafrikileria.com/test/api/order?output_format=JSON";
         } else {
             $endpoint = "https://lafrikileria.com/api/order?output_format=JSON";
-        }       
+        }
 
         $curl = curl_init();
 
@@ -2130,9 +2137,9 @@ class MiraklPedidos
             foreach ($pedidos_procesando AS $pedido) {               
                 
                 $this->error = 1;
-                $this->mensajes[] = "- Warning, el pedido order_id ".$pedido['order_id']." de marketplace ".ucfirst($pedido['marketplace'])." permanece en estado procesando desde ".$pedido['date_procesando'];            
+                $this->mensajes[] = "- WARNING, el pedido order_id ".$pedido['order_id']." de marketplace ".ucfirst($pedido['marketplace'])." permanece en estado procesando desde ".$pedido['date_procesando'];            
 
-                file_put_contents($this->log_file, date('Y-m-d H:i:s')." - Warning, el pedido order_id ".$pedido['order_id']." de marketplace ".ucfirst($pedido['marketplace'])." permanece en estado procesando desde ".$pedido['date_procesando'].PHP_EOL, FILE_APPEND);  
+                file_put_contents($this->log_file, date('Y-m-d H:i:s')." - WARNING, el pedido order_id ".$pedido['order_id']." de marketplace ".ucfirst($pedido['marketplace'])." permanece en estado procesando desde ".$pedido['date_procesando'].PHP_EOL, FILE_APPEND);  
                 
                 Db::getInstance()->Execute("UPDATE lafrips_mirakl_orders
                     SET

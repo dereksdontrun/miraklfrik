@@ -207,10 +207,6 @@ class MiraklOfertasExportarPVP
             //la API P11 solo permite solicitar ofertas de productos de 100 en 100 productos, así que hay que hacer un do while hasta que se hayan obtenido todos los de cada marketplace-canal
             $exit = 0;            
 
-            //reseteamos el json y el array de productos para cada canal
-            $this->array_ofertas_productos = array(); 
-            $this->json_ofertas_productos = "";   
-
             do {        
                 //obtenemos 100 productos de tabla, que se almacenarán en $this->skus
                 $get_skus = $this->getSkus();
@@ -230,7 +226,19 @@ class MiraklOfertasExportarPVP
                     if (!$this->procesaOfertasProductos()) {
                         //error con procesos, volvemos al loop               
                         continue;
-                    }    
+                    }     
+
+                    //llamamos a la API OF24 con las ofertas que queremos realizar nosotros para cada producto sobre los skus que hemos obtenido. El json con todas las ofertas estará en $json_ofertas_productos
+                    if (!$this->apiOF24OfertasProducto()) {
+                        //error con proceso APIs, volvemos al loop               
+                        continue;
+                    } else {
+                        //comprobamos si hay informe de error con el import_id llamando a API OF03. Si devuelve 404 not found es que no hubo errores, consideraremos eso como OK
+                        if (!$this->apiOF03ErrorReport()) {
+                            //error con proceso APIs, volvemos al loop               
+                            continue;
+                        }
+                    }
 
                     // echo '<pre>';
                     // print_r($this->json_ofertas_productos);
@@ -240,49 +248,18 @@ class MiraklOfertasExportarPVP
                     
 
                 } elseif ($get_skus === false) {
-                    //no hay productos en la tabla activos, con check_pvp = 0 para el marketplace y canal, interrumpimos el proceso, salimos del do - while para pasar enviar los productos que ya hemos procesado y pasar a otro canal
+                    //no hay productos en la tabla activos, con check_pvp = 0 para el marketplace y canal, interrumpimos el proceso, salimos del do - while para pasar a otro canal
                     break;
                 }
                 
                 //comprobamos el tiempo que llevamos cada vez, si se alcanza no solo salimos del do while sino que hay que terminar la ejecución, para ello debemos salir del do while, del foreach de canales y del foreach de marketplaces utilizando break con el label que le hemos puesto al foreach externo
-                //NO ,  AL ACUMULAR TODOS LOS PRODUCTOS PARA HACER UNA SOLA LLAMADA A OF24, AQUÍ YA NO SALIMOS DEL TODO, SOLO DEL DO WHILE PARA ENVIAR LOS QUE SE HAYAN PROCESADO, ES DECIR break EN LUGAR DE break 2;
                 if (((time() - $this->inicio) >= $this->my_max_execution_time) || ((time() - $this->inicio) >= $this->max_execution_time_x_minutos)) {                   
-                    file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Tiempo ejecución alcanzando límite, interrumpimos DO WHILE'.PHP_EOL, FILE_APPEND);
+                    file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Tiempo ejecución alcanzando límite, interrumpimos proceso'.PHP_EOL, FILE_APPEND);
 
-                    break;
+                    break 2;
                 }
 
-            } while (!$exit);   
-
-            //24/07/2024 Para evitar llamar a API OF24 una vez por cada 100 productos, vamos a ir acumulando los pedidos en un solo json que enviaremos de una sola vez. Llamaremos a API OF24 cuando hayamos terminado el canal
-
-            //hemos recorrido todos los productos del canal, de 100 en 100, guardando cada array $array_oferta_producto dentro del array $array_ofertas_productos. Lo metemos en un último array para codificar a json que luego lanzaremos a API OF24
-            if (!empty($this->array_ofertas_productos)) {
-                $offers_array = array(
-                    "offers" => $this->array_ofertas_productos
-                );
-        
-                $this->json_ofertas_productos = json_encode($offers_array);  
-
-                file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Productos procesados: '.count($this->array_ofertas_productos).PHP_EOL, FILE_APPEND);
-
-            } else {
-                file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Productos NO procesados'.PHP_EOL, FILE_APPEND);
-
-                return false;
-            }
-            
-            //llamamos a la API OF24 con las ofertas que queremos realizar nosotros para cada producto sobre los skus que hemos obtenido. El json con todas las ofertas estará en $json_ofertas_productos
-            if (!$this->apiOF24OfertasProducto()) {
-                //error con proceso APIs, pasamos a siguiente canal              
-                continue;
-            } else {
-                //comprobamos si hay informe de error con el import_id llamando a API OF03. Si devuelve 404 not found es que no hubo errores, consideraremos eso como OK
-                if (!$this->apiOF03ErrorReport()) {
-                    //error con proceso APIs, pasamos a siguiente canal            
-                    continue;
-                }
-            }
+            } while (!$exit);    
 
         }
 
@@ -290,8 +267,10 @@ class MiraklOfertasExportarPVP
     }
 
 
-    public function procesaOfertasProductos() {           
-        
+    public function procesaOfertasProductos() {    
+        //"reseteamos" el array y el json para productos
+        $this->array_ofertas_productos = array(); 
+        $this->json_ofertas_productos = "";   
         //en $this->ofertas_productos tenemos un array con las ofertas de x productos (normalmente 100), lo recorremos enviando cada grupo de ofertas de un producto individual a ser procesado
         foreach ($this->ofertas_productos AS $this->ofertas_producto) {
             $this->contador_productos++;
@@ -305,7 +284,22 @@ class MiraklOfertasExportarPVP
             }                
         }
 
-        return true;
+        //hemos recorrido todos los productos guardando cada array $array_oferta_producto dentro del array $array_ofertas_productos. Lo metemos en un último array para codificar a json que luego lanzaremos a API OF24
+        if (!empty($this->array_ofertas_productos)) {
+            $offers_array = array(
+                "offers" => $this->array_ofertas_productos
+            );
+    
+            $this->json_ofertas_productos = json_encode($offers_array);  
+
+            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Bloque de productos procesado'.PHP_EOL, FILE_APPEND);
+
+            return true;
+        } else {
+            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Bloque de productos NO procesado'.PHP_EOL, FILE_APPEND);
+
+            return false;
+        }
     }
 
     //función que obtiene el vendedor más barato para una oferta etc
@@ -821,7 +815,6 @@ class MiraklOfertasExportarPVP
     }
 
     //función que "exporta" las ofertas de x productos (hasta 100 generalmente) con su stock, pvp etc
-    //24/07/2024 en lugar de enviar solo 100 como haciamos limitados por API P11 que solo permite descargar 100 ofertas a la vez, acumulamos los productos y ahora enviamos todas las ofertas al mismo tiempo en una sola llamada por canal
     public function apiOF24OfertasProducto() {
         $this->import_id = "";
 
