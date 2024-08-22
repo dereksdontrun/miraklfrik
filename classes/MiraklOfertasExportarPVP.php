@@ -200,7 +200,7 @@ class MiraklOfertasExportarPVP
 
             $this->shop_key = $this->marketplaces_credentials[$this->marketplace]['shop_key'];                
 
-            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Marketplace '.ucfirst($this->marketplace).', canal '.$channel['iso'].' - Ofertas productos activos:'.PHP_EOL, FILE_APPEND);  
+            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Marketplace '.ucfirst($this->marketplace).', canal '.$this->channel.', ISO '.$channel['iso'].' - Ofertas productos activos:'.PHP_EOL, FILE_APPEND);  
 
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Solicitando productos activos para '.$this->channel.PHP_EOL, FILE_APPEND);             
                 
@@ -352,8 +352,9 @@ class MiraklOfertasExportarPVP
         if ($this->total_vendedores == 1) {
             //una sola oferta, nos aseguramos de ser nosotros. Hasta mejor método, revisamos que el nombre coincida, con y sin tilde en la i
             if (($this->ofertas_producto['offers'][0]['shop_name'] != 'La Frikilería') && ($this->ofertas_producto['offers'][0]['shop_name'] != 'La Frikileria')) {
-                //no estamos como vendedores, marcamos el error y "reseteamos" el producto               
-                $this->otros_vendedores_min_pvp_nombre = $this->ofertas_producto['offers'][0]['shop_name'];
+                //no estamos como vendedores, marcamos el error y "reseteamos" el producto 
+                //07/08/2024 metemos pSQL porque han aparecido nombres con comillas etc              
+                $this->otros_vendedores_min_pvp_nombre = pSQL($this->ofertas_producto['offers'][0]['shop_name']);
 
                 $this->otros_vendedores_pvp_min = $this->ofertas_producto['offers'][0]['total_price'];
 
@@ -387,7 +388,8 @@ class MiraklOfertasExportarPVP
             //más de un vendedor, miramos quien tiene la buyboxHasta mejor método, revisamos que el nombre coincida, con y sin tilde en la i
             if (($this->ofertas_producto['offers'][0]['shop_name'] == 'La Frikilería') || ($this->ofertas_producto['offers'][0]['shop_name'] == 'La Frikileria')) {
                 //tenemos buybox, tenemos que sacar el siguiente vendedor más barato, sabemos que es la segunda posición del array de ofertas
-                $this->otros_vendedores_min_pvp_nombre = $this->ofertas_producto['offers'][1]['shop_name'];  
+                //07/08/2024 metemos pSQL porque han aparecido nombres con comillas etc              
+                $this->otros_vendedores_min_pvp_nombre = pSQL($this->ofertas_producto['offers'][1]['shop_name']);  
         
                 $this->otros_vendedores_pvp_min = $this->ofertas_producto['offers'][1]['total_price'];
 
@@ -419,7 +421,8 @@ class MiraklOfertasExportarPVP
                 
             } else {
                 //no tenemos la buybox, calculamos qué pvp podemos exportar
-                $this->otros_vendedores_min_pvp_nombre = $this->ofertas_producto['offers'][0]['shop_name'];  
+                //07/08/2024 metemos pSQL porque han aparecido nombres con comillas etc              
+                $this->otros_vendedores_min_pvp_nombre = pSQL($this->ofertas_producto['offers'][0]['shop_name']);  
         
                 $this->otros_vendedores_pvp_min = $this->ofertas_producto['offers'][0]['total_price'];
 
@@ -445,6 +448,12 @@ class MiraklOfertasExportarPVP
                 
             }
         }
+
+        //29/07/2024 hacemos una prueba ñapa para enviar a tradeinn siempre el pvp_minimo, independientemente de los resultados
+        //12/08/2024 le pongo un 5% extra
+        if ($this->marketplace == 'tradeinn') {
+            $this->pvp_exportado = $this->pvp_minimo*1.05;
+        }        
 
         $this->updateTablaOferta();        
         
@@ -684,8 +693,9 @@ class MiraklOfertasExportarPVP
         LIMIT 100";
            
         if (!$productos_tabla_mirakl_ofertas = Db::getInstance()->ExecuteS($sql_select)) {
+            // como no es necesariamente un error sino simplemente que no hay más productos no lo metemos
             // $this->error = 1;
-            $this->mensajes[] = "No se pudieron obtener o no hay sin procesar los productos de lafrips_mirakl_ofertas para marketplace ".ucfirst($this->marketplace)." canal ".$this->channel;            
+            // $this->mensajes[] = "No se pudieron obtener o no hay sin procesar los productos de lafrips_mirakl_ofertas para marketplace ".ucfirst($this->marketplace)." canal ".$this->channel;            
 
             file_put_contents($this->log_file, date('Y-m-d H:i:s')." - No se pudieron obtener o no hay sin procesar los productos de lafrips_mirakl_ofertas para marketplace ".ucfirst($this->marketplace)." canal ".$this->channel.PHP_EOL, FILE_APPEND);     
             

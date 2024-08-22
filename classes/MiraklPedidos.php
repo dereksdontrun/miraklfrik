@@ -15,6 +15,8 @@ include_once(dirname(__FILE__).'/../miraklfrik.php');
 // 1 - Buscar pedidos en estado WAITING_ACCEPTANCE (API OR11), y aceptar sus líneas de pedido (API OR21). Guardamos datos básicos del pedido en lafrips_mirakl_orders con campo aceptado = 1
 // 2 - En otra ejecución volver a buscar el estado del anterior pedido (API OR11). Si es SHIPPING es que está aceptado y cobrado. Se trata de revisar el pago y su paso a estado shipping, si es correcto tendremos acceso a los datos de cliente. Lo marcamos como revisado_shipping = 1 y lo creamos en Prestashop.
 // 3 - En posteriores procesos se busca en la tabla lafrips_mirakl_orders los pedidos con revisado_shipping = 1 pero enviado = 0 y se comprueba su estado en Prestashop. Cuando estén enviados se recogerán sus datos de envío y enviarán a Mirakl (API OR23) y seguido se confirmará el envío (API OR24).
+//31/07/2024 A veces si no vamos a poder enviarlo antes de la fecha límite lo que hacen es sacar la etiqueta de envío en Prestashop y confirmar shipping y envío en Mirakl, con lo que cuando se envía de verdad en Prestashop mi proceso da error. Ahora vamos a comprobar el estado del pedido en Mirakl antes de confirmar su envío, y si esta SHIPPED pasamos a preparar la factura
+// 4 - Preparar y enviar factura del pedido
 
 //Cada vez que hagamos algo con un pedido hay que marcarle procesando = 1 en lafrips_mirakl_orders para que si por error se ejcuta la tarea cron dos veces muy seguidas, no se esté trabajando sobre el mismo pedido (enviando datos a API o duplicándolo en Prestashop, etc) pasando preocesando a 0 al terminar el proceso en curso. Se pondrá la fecha para revisar los pedidos que lleven más de  x minutos en ese estado procesando = 1
 
@@ -340,6 +342,7 @@ class MiraklPedidos
         $this->confirmarShipping();       
         
         //buscamos pedidos enviados con sus datos de shipping actualizados en Mirakl y confirmamos su envío en Mirakl
+        //31/07/2024 Para evitar errores en los que alguien a confirmado el envío manualmente en Mirakl para evitar la fecha límite, ahora antes de confirmar el envío comprobamos antes su estado en Mirakl, y si es SHIPPED solo marcamos como confirmado, ya que si tratamos de confirmar el envío de un pedido ya confirmado devolverá error
         $this->confirmarEnvios(); 
 
         //buscamos pedidos confirmados en Mirakl, generamos su factura en Prestashop, almacenándola en el servidor y la exportamos a Mirakl
@@ -560,15 +563,15 @@ class MiraklPedidos
                 if ($order_tax_mode == 'TAX_INCLUDED') {
                     //el iva está incluido, calculamos el precio sin iva
                     //se ha vendido por:
-                    $order_detail['unit_price_tax_incl'] = $order_line['total_price']*$this->cambio;
+                    $order_detail['unit_price_tax_incl'] = $order_line['price_unit']*$this->cambio;
                     //como tiene incluido el iva, lo calculamos sin iva. pvp / (1+ iva/100) Si iva es 21, dividimos entre 1.21
-                    $order_detail['unit_price_tax_excl'] = ($order_line['total_price']/(1+($iva_producto/100)))*$this->cambio;
+                    $order_detail['unit_price_tax_excl'] = ($order_line['price_unit']/(1+($iva_producto/100)))*$this->cambio;
 
                 } else {
                     //el iva está no incluido, calculamos el precio añadiendo el iva
-                    $order_detail['unit_price_tax_excl'] = $order_line['total_price']*$this->cambio;
+                    $order_detail['unit_price_tax_excl'] = $order_line['price_unit']*$this->cambio;
                     //calculamos multiplicando por 1+ iva/100
-                    $order_detail['unit_price_tax_incl'] = ($order_line['total_price']*(1+($iva_producto/100)))*$this->cambio;
+                    $order_detail['unit_price_tax_incl'] = ($order_line['price_unit']*(1+($iva_producto/100)))*$this->cambio;
 
                 }
 
@@ -652,10 +655,14 @@ class MiraklPedidos
 
         if ($error_calculos) {
             file_put_contents($this->log_file, date('Y-m-d H:i:s').' - ERROR detectado en los cálculos de costes del pedido. La diferencia entre el coste total devuelto por la API y el coste calculado es superior a 0.50€ ('.ROUND($diferencia, 3).' €) para pedido '.$this->mirakl_order_info['order_id'].' de marketplace '.ucfirst($this->marketplace).' - Interrumpida creación de pedido'.PHP_EOL, FILE_APPEND); 
+            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Volcado de $this->webservice_order_info["order"]: '.print_r($this->webservice_order_info["order"], true).PHP_EOL, FILE_APPEND);
+            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Volcado de $this->webservice_order_info["order_details"]: '.print_r($this->webservice_order_info["order_details"], true).PHP_EOL, FILE_APPEND);
 
             $this->error = 1;
                 
             $this->mensajes[] = '- ERROR detectado en los cálculos de costes del pedido. La diferencia entre el coste total devuelto por la API y el coste calculado es superior a 0.50€ ('.ROUND($diferencia, 3).' €) para pedido '.$this->mirakl_order_info['order_id'].' de marketplace '.ucfirst($this->marketplace).' - Interrumpida creación de pedido'; 
+            $this->mensajes[] = ' - Volcado de $this->webservice_order_info["order"]: '.print_r($this->webservice_order_info["order"], true);
+            $this->mensajes[] = ' - Volcado de $this->webservice_order_info["order_details"]: '.print_r($this->webservice_order_info["order_details"], true);
             
             return false;
         }
@@ -1292,18 +1299,51 @@ class MiraklPedidos
 
             $this->order_id = $pedido['order_id'];
             $this->id_order = $pedido['id_order'];
-            
-            //damos el pedido por envíado vía API
-            if (!$this->validateShipmentAPIOR24()) {
-                //problemas validando, pasamos al siguiente
+
+            //31/07/2024 Comprobamos el esatdo de pedido en Mirakl por si ya está SHIPPED
+            //pedimos a APIOR11 la info del pedido $this->order_id del marketplace. Si el proceso es correcto quedará en $this->respuesta_OR11
+            if (!$this->getInfoAPIOR11('unico')) {
+                //problemas recibiendo la info
                 //quitamos procesando
                 $this->setProcesando($pedido['id_mirakl_orders'], false); 
 
                 continue;
             }
 
-            //actualizamos la tabla mirakl_orders
-            $this->updateMiraklOrders('confirmado');
+            file_put_contents($this->log_file, date('Y-m-d H:i:s').' - El pedido '.$this->order_id.' id_order '.$this->id_order.' para confirmar envío se encuentra en estado de Mirakl '.$this->respuesta_OR11['orders'][0]['order_state'].PHP_EOL, FILE_APPEND); 
+
+            //si el pedido está en SHIPPING en Mirakl lo confirmaremos como enviado, si está ya SHIPPED lo marcamos como confirmado en mirakl_orders
+            if ($this->respuesta_OR11['orders'][0]['order_state'] == 'SHIPPING') {   
+                file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Procedemos a confirmar envío de pedido'.PHP_EOL, FILE_APPEND); 
+                //damos el pedido por envíado vía API
+                if (!$this->validateShipmentAPIOR24()) {
+                    //problemas validando, pasamos al siguiente
+                    //quitamos procesando
+                    $this->setProcesando($pedido['id_mirakl_orders'], false); 
+
+                    continue;
+                }
+
+                //actualizamos la tabla mirakl_orders
+                $this->updateMiraklOrders('confirmado');
+
+            } elseif ($this->respuesta_OR11['orders'][0]['order_state'] == 'SHIPPED') {
+                file_put_contents($this->log_file, date('Y-m-d H:i:s').' - Pedido '.$this->order_id.' id_order '.$this->id_order.' ya enviado y confirmado en Mirakl'.PHP_EOL, FILE_APPEND);
+
+                //actualizamos la tabla mirakl_orders
+                $this->updateMiraklOrders('confirmado');
+
+            } else {
+                //el epdido se encuentra en un estado que no debería en Mirakl, marcamos error
+                file_put_contents($this->log_file, date('Y-m-d H:i:s').' - ERROR, El Pedido '.$this->order_id.' id_order '.$this->id_order.' se encuentra en un estado erróneo para el proceso en Mirakl'.PHP_EOL, FILE_APPEND);
+    
+                $this->error = 1;
+            
+                $this->mensajes[] = ' - ERROR, El Pedido '.$this->order_id.' id_order '.$this->id_order.' se encuentra en un estado erróneo para el proceso en Mirakl';
+
+                //quitamos procesando
+                $this->setProcesando($pedido['id_mirakl_orders'], false);                 
+            }
 
             continue;
         }
@@ -1492,9 +1532,9 @@ class MiraklPedidos
 
                 // $this->error = 1;
                     
-                $this->mensajes[] = 'Atención, respuesta de la API Mirakl OR11 /api/orders para petición de '.strtoupper($request).' para marketplace '.ucfirst($this->marketplace).' CORRECTA pero NO DEVOLVIÓ INFORMACIÓN DE NINGÚN PEDIDO'; 
-                $this->mensajes[] = 'Http Response Code = '.$http_code; 
-                $this->mensajes[] = 'Recibida información de total_count = '.$response_decode['total_count'].' pedido/s';                           
+                // $this->mensajes[] = 'Atención, respuesta de la API Mirakl OR11 /api/orders para petición de '.strtoupper($request).' para marketplace '.ucfirst($this->marketplace).' CORRECTA pero NO DEVOLVIÓ INFORMACIÓN DE NINGÚN PEDIDO'; 
+                // $this->mensajes[] = 'Http Response Code = '.$http_code; 
+                // $this->mensajes[] = 'Recibida información de total_count = '.$response_decode['total_count'].' pedido/s';                           
 
                 return false;
             }
@@ -2064,7 +2104,7 @@ class MiraklPedidos
             $select = ', mor.id_order, ord.current_state';
             $condicion = ' AND mor.creado_prestashop = 1 
             AND mor.enviado_prestashop = 0
-            AND TIMESTAMPDIFF(MINUTE, mor.date_creado_prestashop, NOW()) >= 2';
+            AND (TIMESTAMPDIFF(MINUTE, mor.date_creado_prestashop, NOW()) >= 2 OR mor.date_creado_prestashop = "0000-00-00 00:00:00")';
 
         } elseif ($revision == 'confirmado envio') {
             //de momento no ponemos un plazo de tiempo para sacar los pedidos recién confirmado su shipping porque parece ser inmediato y así se confirma en el mismo proceso
