@@ -66,6 +66,9 @@ class MiraklCatalogoConnect
     // 117-DCARZZ JEWELRY
     public $proveedores_evitar = array(0, 108, 161, 51, 11, 38, 42, 89, 172, 12, 117);  
 
+    //03/10/2024 Añadimos productos a evitar, pueden ser productos concretos que sabemos que mirakl tiene mal o nos van a dar problemas
+    public $productos_evitar = array(58323);  
+
     public $log = true;    
 
     //variable para el archivo a generar en el servidor con las líneas log
@@ -173,6 +176,13 @@ class MiraklCatalogoConnect
         } else {
             $evitar_proveedores = " AND pro.id_supplier NOT IN (".implode(',', $this->proveedores_evitar).") ";
         }
+
+        //03/10/2024
+        if (empty($this->productos_evitar)) {
+            $evitar_productos = "";
+        } else {
+            $evitar_productos = " AND pro.id_product NOT IN (".implode(',', $this->productos_evitar).") ";
+        }
         
         //rellenamos de ceros a la izquierda en el ean
         $sql_productos = "SELECT 
@@ -208,6 +218,7 @@ class MiraklCatalogoConnect
         WHERE 1
         ".$evitar_fabricantes."
         ".$evitar_proveedores."
+        ".$evitar_productos."
         AND IFNULL(pat.ean13, pro.ean13) != ''
         AND pro.is_virtual = 0
         AND pro.cache_is_pack = 0

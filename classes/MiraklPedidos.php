@@ -2427,7 +2427,7 @@ class MiraklPedidos
         $cuentas = 'sergio@lafrikileria.com';
 
         if ($productos_sin_stock !== null) {
-            $cuentas = array('sergio@lafrikileria.com', 'alberto@lafrikileria.com');
+            $cuentas = array('sergio@lafrikileria.com', 'alberto@lafrikileria.com','beatriz@lafrikileria.com');
             $asunto = 'ERROR producto/s sin stock en pedido '.$this->order_id.' de marketplace '.ucfirst($this->marketplace).' - Mirakl '.date("Y-m-d H:i:s");
             $mensaje_email[] = 'Pedido no confirmado';
             $mensaje_email[] = 'Producto/s sin suficiente stock en el almacén online';

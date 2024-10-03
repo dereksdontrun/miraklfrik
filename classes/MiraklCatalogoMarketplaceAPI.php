@@ -66,6 +66,9 @@ class MiraklCatalogoMarketplaceAPI
     // 117-DCARZZ JEWELRY
     public $proveedores_evitar = array(0, 108, 161, 51, 11, 38, 42, 89, 172, 12, 117);   
 
+    //03/10/2024 Añadimos productos a evitar, pueden ser productos concretos que sabemos que mirakl tiene mal o nos van a dar problemas
+    public $productos_evitar = array(58323); 
+
     public $log = true;    
 
     //variable para el archivo a generar en el servidor con las líneas log
@@ -742,6 +745,13 @@ class MiraklCatalogoMarketplaceAPI
             $evitar_proveedores = " AND pro.id_supplier NOT IN (".implode(',', $this->proveedores_evitar).") ";
         }
 
+        //03/10/2024
+        if (empty($this->productos_evitar)) {
+            $evitar_productos = "";
+        } else {
+            $evitar_productos = " AND pro.id_product NOT IN (".implode(',', $this->productos_evitar).") ";
+        }
+
         //09/05/2024 voy a rellenar con 0 a la izquierda los ean hasta 13 cifras LPAD(IFNULL(pat.ean13, pro.ean13), 13, 0) AS 'product-id',
         // quitamos lo de que solo coja los de una categoría (worten a 09/05/2024)
         // AND pro.id_product IN (SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_origen.")
@@ -776,6 +786,7 @@ class MiraklCatalogoMarketplaceAPI
         WHERE 1
         ".$evitar_fabricantes."
         ".$evitar_proveedores."
+        ".$evitar_productos."
         AND IFNULL(pat.ean13, pro.ean13) != ''
         AND pro.is_virtual = 0
         AND pro.cache_is_pack = 0
