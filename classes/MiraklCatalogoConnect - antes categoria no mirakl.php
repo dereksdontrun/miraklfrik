@@ -67,10 +67,7 @@ class MiraklCatalogoConnect
     public $proveedores_evitar = array(0, 108, 161, 51, 11, 38, 42, 89, 172, 12, 117);  
 
     //03/10/2024 Añadimos productos a evitar, pueden ser productos concretos que sabemos que mirakl tiene mal o nos van a dar problemas
-    public $productos_evitar = array(58323,59613,28480,15557); 
-    
-    //04/12/2024 Categoría para que puedan meter a mano productos que no queremos exportar a Mirakl, en principio para todos los  marketplaces, si no habría que crear diferentes categorías. Lo que haremos será, a los que tengan esa categoría, forzarles siempre stock 0 de modo que si un producto ya está en el marketplace no se quede colgado. Esto haría $productos_evitar redundante
-    public $categoria_no_mirakl = 2824;
+    public $productos_evitar = array(58323,59613,28480,15557);  
 
     public $log = true;    
 
@@ -188,7 +185,6 @@ class MiraklCatalogoConnect
         }
         
         //rellenamos de ceros a la izquierda en el ean
-        //04/12/2024 Añado otra condicion al CASE de quantity, que indica si el producto tiene la categoría NO SUBIR MIRAKL, de modo que se siga exportando , pero se le pondrá stock 0, evitando que productos que ya estén en Mirakl se queden colgados si simplemente dejamos de exportarlos
         $sql_productos = "SELECT 
         IFNULL(pat.reference, pro.reference) AS id, LPAD(IFNULL(pat.ean13, pro.ean13), 13, 0) AS gtin, pla.name as title,
         ROUND(pro.price*((tax.rate/100)+1),2) AS 'standard-price',
@@ -199,7 +195,6 @@ class MiraklCatalogoConnect
         END
         AS 'discount-price',        
         CASE
-        WHEN (SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_no_mirakl." AND id_product = ava.id_product) THEN 0
         WHEN (ava.quantity - IFNULL((SELECT SUM(physical_quantity) FROM lafrips_stock 
 			WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute AND id_warehouse = 4),0)) > 0 
             THEN (ava.quantity - IFNULL((SELECT SUM(physical_quantity) FROM lafrips_stock 
@@ -207,7 +202,7 @@ class MiraklCatalogoConnect
         WHEN ((ava.quantity < 1) AND (ava.out_of_stock = 1) AND (pro.id_supplier IN (".implode(',', $this->proveedores_sin_stock)."))) THEN 999
         ELSE 0
         END AS 'available-quantity',
-        CONCAT( 'http://lafrikileria.com/', ima.id_image, '-large_default/', pla.link_rewrite, '.jpg') AS 'image-url-1'
+        CONCAT( 'http://lafrikileria.com/', ima.id_image, '-large_default/', pla.link_rewrite, '.jpg') AS 'image-url-1'        
         FROM lafrips_stock_available ava
         JOIN lafrips_product pro ON pro.id_product = ava.id_product  
         JOIN lafrips_product_lang pla ON pla.id_product = ava.id_product AND pla.id_lang = ".$this->id_lang."

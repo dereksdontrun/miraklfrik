@@ -69,9 +69,6 @@ class MiraklCatalogoMarketplaceAPI
     //03/10/2024 Añadimos productos a evitar, pueden ser productos concretos que sabemos que mirakl tiene mal o nos van a dar problemas
     public $productos_evitar = array(58323,59613,28480,15557); 
 
-    //04/12/2024 Categoría para que puedan meter a mano productos que no queremos exportar a Mirakl, en principio para todos los  marketplaces, si no habría que crear diferentes categorías. Lo que haremos será, a los que tengan esa categoría, forzarles siempre stock 0 de modo que si un producto ya está en el marketplace no se quede colgado. Esto haría $productos_evitar redundante
-    public $categoria_no_mirakl = 2824;
-
     public $log = true;    
 
     //variable para el archivo a generar en el servidor con las líneas log
@@ -446,11 +443,6 @@ class MiraklCatalogoMarketplaceAPI
                 $producto['quantity'] = 999;
             }    
 
-            //04/12/2024 Si el producto tiene la categoria NO SUBIR MIRAKL, pondremos su stock a 0
-            if ($producto['no_subir_mirakl']) {
-                $producto['quantity'] = 0;
-            }
-
             //si para el marketplace modificamos pvp lo procesamos, redondeando el resultado
             //06/06/2024 por ahora no utilizamos y he cambiado el orden de poner el price, lo dejo comentado
             // if ($this->modificacion_pvp !== 0) {
@@ -760,12 +752,11 @@ class MiraklCatalogoMarketplaceAPI
         } else {
             $evitar_productos = " AND pro.id_product NOT IN (".implode(',', $this->productos_evitar).") ";
         }
-       
+
         //09/05/2024 voy a rellenar con 0 a la izquierda los ean hasta 13 cifras LPAD(IFNULL(pat.ean13, pro.ean13), 13, 0) AS 'product-id',
         // quitamos lo de que solo coja los de una categoría (worten a 09/05/2024)
         // AND pro.id_product IN (SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_origen.")
         //05/06/2024 buscamos si cada producto se encuentra en la tabla lafrips_mirakl_ofertas, independientemente del marketplace etc, para limitar la búsqueda del producto a la hora de sacar el pvp a solo los que sabemos que están
-        //04/12/2024 Añado otro campo, no_subir_mirakl que indica si el producto tiene la categoría NO SUBIR MIRAKL, de modo que se siga exportando , pero se le pondrá stock 0, evitando que productos que ya estén en Mirakl se queden colgados si simplemente dejamos de exportarlos
         $sql_productos = "SELECT 
         IF((SELECT COUNT(*) FROM lafrips_mirakl_ofertas WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute) > 0, 1, 0) AS activo_mirakl,
         ava.id_product AS id_product, ava.id_product_attribute AS id_product_attribute,
@@ -781,8 +772,7 @@ class MiraklCatalogoMarketplaceAPI
         ava.out_of_stock AS permite_pedido_sin_stock,
         (ava.quantity - IFNULL((SELECT SUM(physical_quantity) FROM lafrips_stock 
 			WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute AND id_warehouse = 4),0)) AS quantity,
-        (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship,
-        IF((SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_no_mirakl." AND id_product = pro.id_product),1,0) AS no_subir_mirakl   
+        (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship     
         FROM lafrips_stock_available ava
         JOIN lafrips_product pro ON pro.id_product = ava.id_product          
         LEFT JOIN lafrips_product_attribute pat ON pat.id_product = ava.id_product AND pat.id_product_attribute = ava.id_product_attribute

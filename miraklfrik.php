@@ -65,8 +65,8 @@ class Miraklfrik extends Module
 
         return parent::install() &&
             $this->registerHook('header') &&
-            $this->registerHook('displayBackOfficeHeader') &&
-            $this->registerHook('actionAdminOrdersListingFieldsModifier');
+            $this->registerHook('displayBackOfficeHeader');
+            //  && $this->registerHook('actionAdminOrdersListingFieldsModifier');
     }
 
     public function uninstall()
@@ -219,6 +219,8 @@ class Miraklfrik extends Module
         $this->context->controller->addCSS($this->_path.'/views/css/front.css');
     }
 
+    //18/12/2024 Quitamos el hook por que hemos añadido los cambios a override AdminOrdersController
+    /*
     public function hookActionAdminOrdersListingFieldsModifier($params)
     {
         
@@ -291,4 +293,5 @@ class Miraklfrik extends Module
             'filter_type' => 'text',
         );
     }
+        */
 }

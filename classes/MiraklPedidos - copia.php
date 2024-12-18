@@ -234,8 +234,6 @@ class MiraklPedidos
         
         //obtenemos las credenciales 
         if (!$this->getCredentials()) {
-            $this->enviaEmail();
-
             //problemas con las credenciales
             exit;
         } 
@@ -246,8 +244,6 @@ class MiraklPedidos
 
         //pedimos a APIOR11 la info del pedido $this->order_id del marketplace. Si el proceso es correcto quedará en $this->respuesta_OR11
         if (!$this->getInfoAPIOR11('unico')) {
-            $this->enviaEmail();
-
             //problemas recibiendo la info
             exit;
         }
@@ -279,18 +275,12 @@ class MiraklPedidos
             //no se ha podido crear.
             $this->setProcesando($id_mirakl_orders, false);
 
-            $this->enviaEmail();
-
             exit;
         }   
         
         //se ha creado el pedido y actualizamos la tabla mirakl_orders, si es que procede¿? en este proceso.
         //comprobamos que esté en la tabla
         $this->updateMiraklOrders('creado');
-
-        if ($this->error) {     
-            $this->enviaEmail();
-        }
         
         exit;         
     }
@@ -821,7 +811,6 @@ class MiraklPedidos
         switch ($this->marketplace) {
             case 'worten':              
             case 'pccomponentes':
-            case 'eprice':
                 //el pedido tiene el código ISO del país, de dos letras, en customer-shipping_address-country
                 $country_iso = $this->mirakl_order_info['customer']['shipping_address']['country'];
                 //buscamos el iso en lafrips_lang, si no  está estableceremos language_iso como ES
@@ -1181,8 +1170,6 @@ class MiraklPedidos
 
                 if (!$this->crearPedido()) {
                     $this->setProcesando($pedido['id_mirakl_orders'], false);
-
-                    // $this->enviaEmail();
 
                     continue;
                 }   
@@ -2436,7 +2423,7 @@ class MiraklPedidos
             $mensaje_email = $this->mensajes;
         }
 
-        $asunto = 'ERROR proceso de PEDIDOS de marketplaces MIRAKL '.date("Y-m-d H:i:s");
+        $asunto = 'ERROR proceso de pedidos de marketplaces Mirakl '.date("Y-m-d H:i:s");
         $cuentas = 'sergio@lafrikileria.com';
 
         if ($productos_sin_stock !== null) {
