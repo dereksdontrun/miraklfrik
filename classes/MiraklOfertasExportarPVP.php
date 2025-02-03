@@ -471,10 +471,12 @@ class MiraklOfertasExportarPVP
         //para enviar los pvps vía api por cada sku y canal-marketplace insertamos aquí los datos al json $json_oferta_producto. Para ello es obligatorio incluir el pvp "base" es decir, el price que coincide con el pvp del canal principal del marketplace. Además hay que incluir el stock. Necesitamos exportar también los campos específicos de cada marketplace en el json. Necesitamos obtener de Prestashop su referencia, stock y en función de este y si es campo específico, el leadtime to ship, o el iva etc. En este punto tenemos el id_product e id_product_attribute y referencia en lafrips_mirakl_ofertas, con eso podemos sacar el resto de datos de Prestashop
 
         //04/12/2024 Sacamos si el producto tiene la categoría NO SUBIR MIRAKL, de modo que se siga exportando , pero se le pondrá stock 0, evitando que productos que ya estén en Mirakl se queden colgados si simplemente dejamos de exportarlos
+        //03/02/2025 Para la latencia de productos como redstring y amont que ahora tenemos como dropshipping especial y hemos puesto su latency en mensaje_disponibilidad = 1, como al restarle 2 para sacar el supplier_leadtime_to_ship quedaría negativo, modificamos la sql para que devuelva 1 como mínimo utilizando GREATEST()
+        // (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship,
         $sql_info_producto = "SELECT mio.sku_prestashop AS sku_prestashop, ROUND(tax.rate, 0) AS 'tipo_iva', ava.out_of_stock AS permite_pedido_sin_stock,
         (ava.quantity - IFNULL((SELECT SUM(physical_quantity) FROM lafrips_stock 
             WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute AND id_warehouse = 4),0)) AS quantity,
-        (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship, pro.id_supplier AS id_supplier, mar.out_of_stock AS marketplace_out_of_stock,
+        GREATEST(IFNULL(med.latency, 7) - 2, 1) AS supplier_leadtime_to_ship, pro.id_supplier AS id_supplier, mar.out_of_stock AS marketplace_out_of_stock,
         mar.campos_especificos AS marketplace_campos_especificos,
         mar.additional_fields AS marketplace_additional_fields,
         IF((SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_no_mirakl." AND id_product = pro.id_product),1,0) AS no_subir_mirakl   

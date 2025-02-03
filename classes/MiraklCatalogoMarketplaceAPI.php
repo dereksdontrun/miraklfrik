@@ -738,6 +738,7 @@ class MiraklCatalogoMarketplaceAPI
     //Vamos a poner diferentes tiempos leadtime_to_ship según el proveedor, dado que Redstring quizás da para envío en 4 días pero Noble son 5, de modo que como con Mirakl se pone leadtime_to_ship, que son los días de "preparación" sin contar el viaje del paquete, lo que haremos será restar 2 a lo que haya en la tabla de lafrips_mensaje_disponibilidad, que es el valor latency para amazon, que sería el tiempo desde el pedido hasta llegar al cliente. Redstring tiene 4, queda en 2, Noble tiene 5, queda en 3.
     // Buscamos en la tabla mensaje_disponibilidad y restamos 2 a lo que haya, usando 7 si el proveedor no está en la tabla. Lo sacamos para cada producto según su proveedor, y si luego es necesario se lo pondremos al csv
     // IFNULL(med.latency, 7) AS latency
+    //03/02/2025 Para la latencia de productos como redstring y amont que ahora tenemos como dropshipping especial y hemos puesto su latency en mensaje_disponibilidad = 1, como al restarle 2 para sacar el supplier_leadtime_to_ship quedaría negativo, modificamos la sql para que devuelva 1 como mínimo utilizando GREATEST()
     //sku;product-id;product-id-type;price;quantity;state;available-start-date;available-end-date;discount-price;discount-start-date;discount-end-date;leadtime-to-ship;strike-price-type;canon;tipo-iva;update-delete;
     public function getProductos() {        
         
@@ -766,6 +767,8 @@ class MiraklCatalogoMarketplaceAPI
         // AND pro.id_product IN (SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_origen.")
         //05/06/2024 buscamos si cada producto se encuentra en la tabla lafrips_mirakl_ofertas, independientemente del marketplace etc, para limitar la búsqueda del producto a la hora de sacar el pvp a solo los que sabemos que están
         //04/12/2024 Añado otro campo, no_subir_mirakl que indica si el producto tiene la categoría NO SUBIR MIRAKL, de modo que se siga exportando , pero se le pondrá stock 0, evitando que productos que ya estén en Mirakl se queden colgados si simplemente dejamos de exportarlos
+        //03/02/2025 Para la latencia de productos como redstring y amont que ahora tenemos como dropshipping especial y hemos puesto su latency en mensaje_disponibilidad = 1, como al restarle 2 para sacar el supplier_leadtime_to_ship quedaría negativo, modificamos la sql para que devuelva 1 como mínimo utilizando GREATEST()
+        // (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship,
         $sql_productos = "SELECT 
         IF((SELECT COUNT(*) FROM lafrips_mirakl_ofertas WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute) > 0, 1, 0) AS activo_mirakl,
         ava.id_product AS id_product, ava.id_product_attribute AS id_product_attribute,
@@ -781,7 +784,7 @@ class MiraklCatalogoMarketplaceAPI
         ava.out_of_stock AS permite_pedido_sin_stock,
         (ava.quantity - IFNULL((SELECT SUM(physical_quantity) FROM lafrips_stock 
 			WHERE id_product = ava.id_product AND id_product_attribute = ava.id_product_attribute AND id_warehouse = 4),0)) AS quantity,
-        (IFNULL(med.latency, 7) - 2) AS supplier_leadtime_to_ship,
+        GREATEST(IFNULL(med.latency, 7) - 2, 1) AS supplier_leadtime_to_ship,
         IF((SELECT id_product FROM lafrips_category_product WHERE id_category = ".$this->categoria_no_mirakl." AND id_product = pro.id_product),1,0) AS no_subir_mirakl   
         FROM lafrips_stock_available ava
         JOIN lafrips_product pro ON pro.id_product = ava.id_product          
